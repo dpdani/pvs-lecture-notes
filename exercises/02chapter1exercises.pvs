@@ -1,0 +1,20 @@
+chapter_1: THEORY
+BEGIN
+
+    ex_1: CONJECTURE FORALL (n: nat):
+        n > 5 => n > 10
+
+    ex_2_1?(x,y,z: nat): bool = x^2 = y*x + z*x
+
+    ex_2_2?(x,y,z: nat): bool = x*y = y^2 + z*y
+
+    ex_2_3?(x,y,z: nat): bool = x*z = z^2 + y*z
+
+    ex_2: CONJECTURE FORALL (x,y,z: nat):
+        x = y + z => (ex_2_1?(x,y,z) and ex_2_2?(x,y,z) and ex_2_3?(x,y,z))
+
+    ex_3: CONJECTURE FORALL (x,y,z: nat):
+        (x = y + z and ex_2_1?(x,y,z) and ex_2_2?(x,y,z) and ex_2_3?(x,y,z)) =>
+            (x^2 = y^2 + z^2 + 2*y*z and (y + z)^2 = y^2 + z^2 + 2*y*z)
+
+END chapter_1

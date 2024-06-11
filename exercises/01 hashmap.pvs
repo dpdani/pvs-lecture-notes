@@ -1,0 +1,39 @@
+hashmap: THEORY
+BEGIN
+    K: TYPE
+    V: TYPE
+    M: TYPE = [K -> V]
+
+    null: V
+    empty: M
+    empty_ax: AXIOM
+        FORALL (k: K): empty(k) = null
+
+    lookup: [M, K -> V]
+    lookup_ax: AXIOM FORALL (m: M) (k: K):
+        lookup(m, k) = m(k)
+
+    insert: [M, K, V -> M]
+    insert_ax: AXIOM FORALL (m: M) (k: K) (v: V):
+        insert(m, k, v) = m WITH [(k) := v]
+
+    delete: [M, K -> M]
+    delete_ax: AXIOM FORALL (m: M) (k: K):
+        delete(m, k) = m WITH [(k) := null]
+
+    is_in?: [M, K -> bool]
+    is_in_ax: AXIOM FORALL (m: M), (k: K):
+        m(k) /= null
+
+    insert_is_in_ax: AXIOM FORALL (m: M), (k: K), (v: V):
+        is_in?(insert(m, k, v), k)
+
+    insert_then_lookup: CONJECTURE FORALL (m: M) (k: K) (v: V):
+        lookup(insert(m, k, v), k) = v
+
+    insert_then_delete: CONJECTURE FORALL (m: M), (k: K), (v: V):
+        lookup(m, k) = null => delete(insert(m, k, v), k) = m
+
+    what: CONJECTURE FORALL (k: K):
+        is_in?(insert(empty, k, null), k)
+END hashmap

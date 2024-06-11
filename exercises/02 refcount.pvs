@@ -1,0 +1,629 @@
+refcount[T: {x: nat | x >= 1}]: THEORY
+BEGIN
+
+    Object: TYPE = [#
+        refcount: nat,
+        allocated: bool,
+        freed: bool
+    #]
+
+    Address: TYPE = nat
+    NULL: Address = 0
+
+    Register: TYPE = upto[10]
+    Variable: TYPE = upto[10]
+    Thread: TYPE = upto[T]
+    t, t1, t2: VAR Thread
+
+    % GC: DATATYPE
+    % BEGIN
+    %     gc_NULL: gc_NULL?
+    %     gc(obj: Address, next: GC): gc?
+    % END GC
+
+    GC: TYPE = list[Address]
+
+    State: TYPE = [#
+        memory: [Address -> Object],
+
+        registers: [Thread -> [Register -> nat]],
+        variables: [Thread -> [Variable -> Address]],
+
+        gc_head: GC,
+
+        STW_world_stopped: bool,
+        STW_requested: bool,
+        STW_count_down: upto[T],
+
+        pc: [Thread -> nat]
+    #]
+
+    s, s1, s2: VAR State
+
+
+    % operations
+    alloc(t, s1, s2): bool = s1`pc(t) = 28 and (
+        exists (a: Address): (
+            (
+                % preconditions
+                s1`memory(a) = (# refcount := 0, allocated := false, freed := false #)
+            )
+        ) => (
+            % mutation (allocation)
+            s2 = s1 with [
+                (memory)(a) := (# refcount := 1, allocated := true, freed := false #),
+                (registers)(t)(0) := a,
+                (pc)(t) := 154
+            ]
+        )
+    )
+
+    free(t, s1, s2): bool = s1`pc(t) = 38 and (
+        if s1`memory(s1`registers(t)(0))`freed = false then
+            s2 = s1 with [
+                (memory)(s1`registers(t)(0)) := s1`memory(s1`registers(t)(0)) with [
+                    (freed) := true
+                ],
+                (pc)(t) := 107
+            ]
+        else
+            s2 = s1 with [
+                (pc)(t) := 107
+            ]
+        endif
+    )
+
+    inc_ref_1(t, s1, s2): bool = s1`pc(t) = 44 and (
+        s2 = s1 with [
+            (registers)(t)(1) := s1`memory(s1`registers(t)(0))`refcount,
+            (pc)(t) := 46
+        ]
+    )
+
+    inc_ref_2(t, s1, s2): bool = s1`pc(t) = 46 and (
+        if s1`registers(t)(1) = 0 then
+            s2 = s1 with [
+                (pc)(t) := 47
+            ]
+        else
+            s2 = s1 with [
+                (pc)(t) := 50
+            ]
+        endif
+    )
+
+    inc_ref_3(t, s1, s2): bool = s1`pc(t) = 47 and (
+        s2 = s1 with [
+            (registers)(t)(0) := NULL,
+            (pc)(t) := 196
+        ]
+    )
+
+    inc_ref_4(t, s1, s2): bool = s1`pc(t) = 50 and (
+        if s1`memory(s1`registers(t)(0))`refcount /= s1`registers(t)(1) then
+            s2 = s1 with [
+                (pc)(t) := 44
+            ]
+        else
+            s2 = s1 with [
+                (memory)(s1`registers(t)(0)) := s1`memory(s1`registers(t)(0)) with [
+                    (refcount) := s1`registers(t)(1) + 1
+                ],
+                (pc)(t) := 196
+            ]
+        endif
+    )
+
+    dec_ref_1(t, s1, s2): bool = s1`pc(t) = 77 and (
+        s2 = s1 with [
+            (registers)(t)(1) := s1`memory(s1`registers(t)(0))`refcount,
+            (pc)(t) := 79
+        ]
+    )
+
+    dec_ref_2(t, s1, s2): bool = s1`pc(t) = 79 and (
+        if s1`registers(t)(1) = 0 then
+            s2 = s1 with [
+                (pc)(t) := 80
+            ]
+        else
+            s2 = s1 with [
+                (pc)(t) := 83
+            ]
+        endif
+    )
+
+    dec_ref_3(t, s1, s2): bool = s1`pc(t) = 80 and (
+        s2 = s1 with [
+            (registers)(t)(0) := NULL,
+            (pc)(t) := 175
+        ]
+    )
+
+    dec_ref_4(t, s1, s2): bool = s1`pc(t) = 83 and (
+        if s1`memory(s1`registers(t)(0))`refcount /= s1`registers(t)(1) then
+            s2 = s1 with [
+                (pc)(t) := 77
+            ]
+        else
+            s2 = s1 with [
+                (memory)(s1`registers(t)(0)) := s1`memory(s1`registers(t)(0)) with [
+                    (refcount) := s1`registers(t)(1) - 1
+                ],
+                (pc)(t) := 84
+            ]
+        endif
+    )
+
+    dec_ref_5(t, s1, s2): bool = s1`pc(t) = 84 and (
+        s2 = s1 with [
+            (registers)(t)(1) := s1`registers(t)(1) - 1,
+            (pc)(t) := 86
+        ]
+    )
+
+    dec_ref_6(t, s1, s2): bool = s1`pc(t) = 86 and (
+        if s1`registers(t)(1) = 0 then
+            s2 = s1 with [
+                (pc)(t) := 87
+            ]
+        else
+            s2 = s1 with [
+                (pc)(t) := 175
+            ]
+        endif
+    )
+
+    dec_ref_7(t, s1, s2): bool = s1`pc(t) = 87 and (  % perform lines 87 to 97 as one atomic operation
+        s2 = s1 with [
+            (gc_head) := append(s1`gc_head, cons(s1`registers(t)(0), null)),
+            (pc)(t) := 107
+        ]
+    )
+
+    collect(t, s1, s2): bool = s1`pc(t) = 107 and (
+        if s1`gc_head = null then
+            s2 = s1 with [
+                (pc)(t) := 124
+            ]
+        else
+            s2 = s1 with [
+                (gc_head) := cdr(s1`gc_head),
+                (memory)(car(s1`gc_head)) := s1`memory(car(s1`gc_head)) with [
+                    (freed) := true
+                ],
+                (pc)(t) := 107
+            ]
+        endif
+    )
+
+    gc_cycle_1(t, s1, s2): bool = s1`pc(t) = 115 and (
+        if s1`STW_requested = false then
+            s2 = s1 with [
+                (STW_requested) := true,
+                (pc)(t) := 119
+            ]
+        else
+            s2 = s1 with [
+                (pc)(t) := 204
+            ]
+        endif
+    )
+
+    gc_cycle_2(t, s1, s2): bool = s1`pc(t) = 119 and (
+        if s1`STW_count_down - 1 > 0 then
+            s2 = s1 with [
+                (pc)(t) := 119
+            ]
+        else
+            s2 = s1 with [
+                (pc)(t) := 120
+            ]
+        endif
+    )
+
+    gc_cycle_3(t, s1, s2): bool = s1`pc(t) = 120 and (
+        s2 = s1 with [
+            (STW_world_stopped) := true,
+            (pc)(t) := 107
+        ]
+    )
+
+    gc_cycle_4(t, s1, s2): bool = s1`pc(t) = 124 and (
+        s2 = s1 with [
+            (STW_world_stopped) := false,
+            (STW_requested) := false,
+            (STW_count_down) := T,
+            (pc)(t) := 204
+        ]
+    )
+
+    STW_wait_1(t, s1, s2): bool = s1`pc(t) = 131 and (
+        if s1`STW_world_stopped then
+            s2 = s1 with [
+                (pc)(t) := 131
+            ]
+        else
+            s2 = s1 with [
+                (pc)(t) := 133
+            ]
+        endif
+    )
+
+    STW_wait_2(t, s1, s2): bool = s1`pc(t) = 133 and (
+        if s1`STW_requested then
+            s2 = s1 with [
+                (pc)(t) := 135
+            ]
+        else
+            s2 = s1 with [
+                (pc)(t) := 148
+            ]
+        endif
+    )
+
+    STW_wait_3(t, s1, s2): bool = s1`pc(t) = 135 and (
+        s2 = s1 with [
+            (registers)(t)(1) := s1`STW_count_down,
+            (pc)(t) := 136
+        ]
+    )
+
+    STW_wait_4(t, s1, s2): bool = s1`pc(t) = 136 and (
+        if s1`registers(t)(1) = s1`STW_count_down then
+            s2 = s1 with [
+                (STW_count_down) := s1`registers(t)(1) - 1,
+                (pc)(t) := 138
+            ]
+        else
+            s2 = s1 with [
+                (pc)(t) := 135
+            ]
+        endif
+    )
+
+    STW_wait_5(t, s1, s2): bool = s1`pc(t) = 138 and (
+        if s1`STW_requested or s1`STW_world_stopped then
+            s2 = s1 with [
+                (pc)(t) := 138
+            ]
+        else
+            s2 = s1 with [
+                (pc)(t) := 148
+            ]
+        endif
+    )
+
+    main_1(t, s1, s2): bool = s1`pc(t) = 146 and (
+        s2 = s1 with [
+            (pc)(t) := 131
+        ]
+    )
+
+    main_2(t, s1, s2): bool = s1`pc(t) = 148 and (
+        exists (action: upto[3]):
+            s2 = s1 with [
+                (registers)(t)(5) := action,
+                (pc)(t) := 149
+            ]
+    )
+
+    main_3(t, s1, s2): bool = s1`pc(t) = 149 and (
+        exists (variable: upto[3]):
+            s2 = s1 with [
+                (registers)(t)(6) := variable,
+                (pc)(t) := 151
+            ]
+    )
+
+    main_4(t, s1, s2): bool = s1`pc(t) = 151 and (
+        cond
+            s1`registers(t)(5) = 0 -> s2 = s1 with [
+                (pc)(t) := 153
+            ],
+            s1`registers(t)(5) = 1 -> s2 = s1 with [
+                (pc)(t) := 168
+            ],
+            s1`registers(t)(5) = 2 -> s2 = s1 with [
+                (pc)(t) := 183
+            ],
+            s1`registers(t)(5) = 3 -> s2 = s1 with [
+                (pc)(t) := 203
+            ],
+            else -> s2 = s1 with [
+                (pc)(t) := 146
+            ]
+        endcond
+    )
+
+    main_5(t, s1, s2): bool = s1`pc(t) = 153 and (
+        if s1`variables(t)(s1`registers(t)(6)) /= NULL then
+            s2 = s1 with [
+                (pc)(t) := 146
+            ]
+        else
+            s2 = s1 with [
+                (pc)(t) := 157
+            ]
+        endif
+    )
+
+    main_6(t, s1, s2): bool = s1`pc(t) = 157 and (
+        s2 = s1 with [
+            (pc)(t) := 28
+        ]
+    )
+
+    main_7(t, s1, s2): bool = s1`pc(t) = 168 and (
+        if s1`registers(t)(0) = NULL then
+            s2 = s1 with [
+                (pc)(t) := 211
+            ]
+        else
+            s2 = s1 with [
+                (pc)(t) := 163
+            ]
+        endif
+    )
+
+    main_8(t, s1, s2): bool = s1`pc(t) = 163 and (
+        s2 = s1 with [
+            (variables)(t)(s1`registers(t)(6)) := s1`registers(t)(0),
+            (registers)(t)(0) := NULL,
+            (pc)(t) := 146
+        ]
+    )
+
+    main_9(t, s1, s2): bool = s1`pc(t) = 168 and (
+        if s1`variables(t)(s1`registers(t)(6)) = NULL then
+            s2 = s1 with [
+                (pc)(t) := 146
+            ]
+        else
+            s2 = s1 with [
+                (pc)(t) := 172
+            ]
+        endif
+    )
+
+    main_10(t, s1, s2): bool = s1`pc(t) = 172 and (
+        s2 = s1 with [
+            (registers)(t)(0) := s1`variables(t)(s1`registers(t)(6)),
+            (pc)(t) := 173
+        ]
+    )
+
+    main_11(t, s1, s2): bool = s1`pc(t) = 173 and (
+        s2 = s1 with [
+            (pc)(t) := 74
+        ]
+    )
+
+    main_12(t, s1, s2): bool = s1`pc(t) = 175 and (
+        if s1`registers(t)(0) = NULL then
+            s2 = s1 with [
+                (pc)(t) := 211
+            ]
+        else
+            s2 = s1 with [
+                (pc)(t) := 179
+            ]
+        endif
+    )
+
+    main_13(t, s1, s2): bool = s1`pc(t) = 179 and (
+        s2 = s1 with [
+            (variables)(t)(s1`registers(t)(6)) := NULL,
+            (registers)(t)(0) := NULL,
+            (pc)(t) := 146
+        ]
+    )
+
+    main_14(t, s1, s2): bool = s1`pc(t) = 183 and (
+        if s1`variables(t)(s1`registers(t)(6)) /= NULL then
+            s2 = s1 with [
+                (pc)(t) := 146
+            ]
+        else
+            s2 = s1 with [
+                (pc)(t) := 187
+            ]
+        endif
+    )
+
+    main_15(t, s1, s2): bool = s1`pc(t) = 187 and (
+        exists (a: Address):
+            s2 = s1 with [
+                (registers)(t)(7) := a,
+                (pc)(t) := 188
+            ]
+    )
+
+    main_16(t, s1, s2): bool = s1`pc(t) = 188 and (
+        if not s1`memory(s1`registers(t)(7))`allocated then
+            s2 = s1 with [
+                (pc)(t) := 146
+            ]
+        else
+            s2 = s1 with [
+                (pc)(t) := 192
+            ]
+        endif
+    )
+
+    main_17(t, s1, s2): bool = s1`pc(t) = 192 and (
+        s2 = s1 with [
+            (variables)(t)(s1`registers(t)(6)) := s1`registers(t)(7),
+            (registers)(t)(0) := s1`registers(t)(7),
+            (pc)(t) := 194
+        ]
+    )
+
+    main_18(t, s1, s2): bool = s1`pc(t) = 194 and (
+        s2 = s1 with [
+            (pc)(t) := 44
+        ]
+    )
+
+    main_19(t, s1, s2): bool = s1`pc(t) = 196 and (
+        if s1`registers(t)(0) = NULL then
+            s2 = s1 with [
+                (pc)(t) := 197
+            ]
+        else
+            s2 = s1 with [
+                (pc)(t) := 200
+            ]
+        endif
+    )
+
+    main_20(t, s1, s2): bool = s1`pc(t) = 197 and (
+        s2 = s1 with [
+            (variables)(t)(s1`registers(t)(6)) := NULL,
+            (pc)(t) := 200
+        ]
+    )
+
+    main_21(t, s1, s2): bool = s1`pc(t) = 200 and (
+        s2 = s1 with [
+            (registers)(t)(0) := NULL,
+            (pc)(t) := 146
+        ]
+    )
+
+    main_22(t, s1, s2): bool = s1`pc(t) = 203 and (
+        s2 = s1 with [
+            (pc)(t) := 115
+        ]
+    )
+
+    main_23(t, s1, s2): bool = s1`pc(t) = 204 and (
+        s2 = s1 with [
+            (pc)(t) := 146
+        ]
+    )
+
+    error(t, s1, s2): bool = s1`pc(t) = 211 and (
+        s2 = s1 with [
+            (pc)(t) := 211
+        ]
+    )
+
+
+    % transitions
+    step(t, s1, s2): bool =
+        alloc(t, s1, s2)
+        or free(t, s1, s2)
+        or inc_ref_1(t, s1, s2)
+        or inc_ref_2(t, s1, s2)
+        or inc_ref_3(t, s1, s2)
+        or inc_ref_4(t, s1, s2)
+        or dec_ref_1(t, s1, s2)
+        or dec_ref_2(t, s1, s2)
+        or dec_ref_3(t, s1, s2)
+        or dec_ref_4(t, s1, s2)
+        or dec_ref_5(t, s1, s2)
+        or dec_ref_6(t, s1, s2)
+        or dec_ref_7(t, s1, s2)
+        or collect(t, s1, s2)
+        or gc_cycle_1(t, s1, s2)
+        or gc_cycle_2(t, s1, s2)
+        or gc_cycle_3(t, s1, s2)
+        or gc_cycle_4(t, s1, s2)
+        or STW_wait_1(t, s1, s2)
+        or STW_wait_2(t, s1, s2)
+        or STW_wait_3(t, s1, s2)
+        or STW_wait_4(t, s1, s2)
+        or STW_wait_5(t, s1, s2)
+        or main_1(t, s1, s2)
+        or main_2(t, s1, s2)
+        or main_3(t, s1, s2)
+        or main_4(t, s1, s2)
+        or main_5(t, s1, s2)
+        or main_6(t, s1, s2)
+        or main_7(t, s1, s2)
+        or main_8(t, s1, s2)
+        or main_9(t, s1, s2)
+        or main_10(t, s1, s2)
+        or main_11(t, s1, s2)
+        or main_12(t, s1, s2)
+        or main_13(t, s1, s2)
+        or main_14(t, s1, s2)
+        or main_15(t, s1, s2)
+        or main_16(t, s1, s2)
+        or main_17(t, s1, s2)
+        or main_18(t, s1, s2)
+        or main_19(t, s1, s2)
+        or main_20(t, s1, s2)
+        or main_21(t, s1, s2)
+        or main_22(t, s1, s2)
+        or main_23(t, s1, s2)
+        or error(t, s1, s2)
+
+
+    % state invariants
+    init(s): bool =
+        forall (a: Address, t: Thread, r: Register, v: Variable): (
+            s`memory(a) = (# refcount := 0, allocated := false, freed := false #)
+            and s`registers(t)(r) = NULL
+            and s`variables(t)(v) = NULL
+            and s`pc(t) = 146
+        ) and (
+            s`gc_head = null
+            and s`STW_world_stopped = false
+            and s`STW_requested = false
+            and s`STW_count_down = T
+        )
+
+    rule_1(s): bool =
+        forall (t: Thread):
+            pc(s)(t) = 154 => memory(s)(registers(s)(t)(0)) = (# refcount := 1, allocated := true, freed := false #)
+    
+    % rule_3(s1, s2): bool =
+    %     forall (t: Thread):
+    %         pc(s1)(t) = 44 => 
+
+    rule_6(s): bool =
+        forall (t: Thread):
+            pc(s)(t) = 38 => (
+                s`memory(s`registers(t)(0))`refcount = 0
+                and s`memory(s`registers(t)(0))`freed = false
+                and s`memory(s`registers(t)(0))`allocated = true
+            )
+
+    rule_7(s): bool =
+        forall (t: Thread, v: Variable):
+            variables(s)(t)(v) /= NULL => memory(s)(variables(s)(t)(v))`freed = false
+    
+    not_in_error_state(s): bool =
+        forall (t: Thread):
+            pc(s)(t) /= 211
+
+    INV(s): bool =
+        rule_1(s)
+        and rule_6(s)
+        and rule_7(s)
+        and not_in_error_state(s)
+
+
+    % intermediate proofs
+    dec_ref_4_implies_dec_ref_2: LEMMA
+        forall (t: Thread): forall(s1: State, s2: State):
+            (
+                INV(s1) and s1`pc(t) = 79 and s1`registers(t)(1) /= 0 and step(t, s1, s2)
+            ) => (
+                INV(s2) and s2`pc(t) = 83 and s2`registers(t)(1) /= 0
+            )
+
+
+    % core proofs
+    % @QED init_implies_state_invariant proved by dp on Thu, 06 Jun 2024 15:45:12 GMT
+    init_implies_invariants: THEOREM
+        forall (s: State):
+            init(s) => INV(s)
+
+    step_implies_invariants: THEOREM
+        forall (t: Thread, s1: State, s2: State):
+            step(t, s1, s2) and INV(s1) => INV(s2)
+
+END refcount

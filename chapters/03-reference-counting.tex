@@ -1,0 +1,170 @@
+\chapter{Concurrent Reference Counting}\label{ch:concurrent-reference-counting}
+
+\begin{itemize}
+	\item shared memory is an array of objects
+	\item objects have a reference count (and nothing else) $\Rightarrow$ cannot have reference cycles
+	
+	\item prove that:
+	\begin{itemize}
+		\item objects reaching refs = 0 are freed (flag)
+		\item ($\star$) no thread tries to incref a freed object $\Rightarrow$ impossible $\Rightarrow$ necessity of GC
+	\end{itemize}
+
+	\item introduce a GC: a thread decides to be the GC (non-determinism)
+	\item prove ($\star$)
+	
+	\item objects have a ``data'' field: a reference to another object $\Rightarrow$ cycles
+	
+	\item prove that every object is eventually freed
+\end{itemize}
+
+Let us now go through a more interesting specification: one that deals with concurrent memory management.
+In this chapter we'll practice ...
+
+As a basis, we observe that computer memory is an array of bytes.
+On a 64-bit computer, you can address memory from byte number 0, to byte number $2^{64} - 1$.
+This is not a simplistic assumption that we're making here: it's the abstraction that all modern computers and operating systems use.
+Of course, memory is more complicated than this: there is virtual memory, kernel-space memory, file-system mapped memory, and process-specific memory, to name a few.
+
+In here, we cannot go in so deep as to take all of these different kinds of memory into consideration.
+Instead, we'll be specifying the memory for one single process, as if all the rest is not there.
+
+Another assumption we'll make is that the machine memory is unbounded.
+This sort of makes memory management redundant, but here we're interested in specifying the behavior of a management system irrespective of the amount of memory it can dispose of.
+
+We can be free to add this constraint later, and we will, after we dealt with the other issues that will come up shortly.
+
+To keep things simple, we'll specify a reference counting-based, object-oriented scheme.
+That is, we assume that our model process has knowledge of thing called objects, that may represent different classes of data.
+In managing memory, though, what the classes of data are isn't important.
+Each object has an amount of memory associated with it and however large or small it may be, we can assume the correct amount will be allocated (because we assumed memory is infinite), and deallocated once the object is freed.
+
+\section{Specification}\label{sec:specification}
+
+The following rules are the behavior of the memory management system we would like to specify:
+
+\begin{myrule}\label{refcount:allocate-1}
+	When an object is allocated, its reference count will be 1.
+\end{myrule}
+
+\begin{myrule}\label{refcount:free-when-0}
+	Any object can be freed if its reference count is 0.
+\end{myrule}
+
+\begin{myrule}\label{refcount:incref}
+	When a new reference is made to an existing object, the object's reference count must be increased by 1.
+\end{myrule}
+
+\begin{myrule}\label{refcount:decref}
+	When an existing reference to an object is removed, the object's reference count must be decreased by 1.
+\end{myrule}
+
+The rules, that will be verified, are based on these intuitive notions:
+\begin{enumerate}
+	\item when an object is allocated, the returned pointer is the only reference to that object;
+	\item such is the case when no other object or variable is referencing it, thus it is safe to reclaim the memory;
+	\item[3-4.] the stored reference count must be kept consistent with its semantics.
+\end{enumerate}
+
+The rules above ensure essentially that, in principle, any allocated object can be eventually freed, when its presence is no longer necessary.
+
+Notice though, how Rule~(\ref{refcount:free-when-0}) doesn't specify that the object \emph{is} freed, only that it \emph{can} be freed.
+This will become important later, but first we need to talk about why these properties alone are not sufficient.
+
+There are important features of a memory management system that we're not guaranteeing: eventual reclamation, and use-after-free avoidance.
+As already stated, Rule~(\ref{refcount:free-when-0}) only requires the possibility of freeing; we want to enforce that an object that can be freed, will be freed.
+
+Use-after-free is a commonly known bug of programs that don't employ a memory management system, or that use it incorrectly.
+What happens is that a piece of memory is freed and then used again, as the name implies, either for a read or for a write.
+At that point, the program generally crashes with a segmentation fault.
+A more subtle, but possibly worse, manifestation of this bug is when the program requests to allocate memory and the allocation routine returns some address $x$, the program then frees $x$, requests more memory to be allocated, and the allocation routine returns $x$ again.\footnote{%
+	This is not an unlikely scenario, many memory management systems allocate chunks of memory.
+	When a call to the free routine is made, the system marks that piece of memory within a chunk as free, and when a successive call to the allocation routine for the same size is made, the previously freed piece is unmarked and returned.
+	
+	This behavior is useful to improve performance by not continuously relying on calls to the kernel when allocations are frequent.
+	Object-oriented and functional language runtimes often exhibit this usage pattern.
+}
+If we distinguish the two states of the object at $x$ with $A$ and $B$, we may be surprised when using the pointer $x$ as if it was $A$, but instead it is $B$.
+This may not be a problem per se, but generally can be a very tricky situation in a concurrent system.
+In fact it could be that one thread $t_1$ frees $A$ and allocates an unrelated object $B$, while another thread $t_2$ still had a pointer $x$ that it considered to pertain to $A$.
+This of course is a bug in the overall program.
+In a reference count-based memory scheme, a possible cause of such a bug is that the code of $t_2$ didn't correctly account for a new reference to $A$, or that $t_1$ incorrectly decremented the reference count.
+
+Let us add more rules to deal with these problems.
+
+% Since we're dealing with the verification of this kind of system, we will deal with an idealized usage, rather than a realistic case: we cannot possibly enumerate all usages.
+% Nevertheless, we still need to prove that the idealized usage, introduced later, is correct: it cannot lead to a program that uses memory previously reclaimed.
+
+
+\begin{myrule}\label{refcount:0-stays-0}
+	When the reference count of an object is 0, it remains 0 until the object is freed.
+\end{myrule}
+
+\begin{myrule}\label{refcount:free-implies-0}
+	If an object is being freed, its reference count must be 0.
+\end{myrule}
+
+\begin{myrule}\label{refcount:use-after-free}
+	If an object has been freed, no thread tries to use it.
+\end{myrule}
+
+\begin{myrule}\label{refcount:eventual-free}
+	After the reference count of an object becomes 0,\footnote{%
+		Such is a definite, unique point in the program execution due to the combination of Rules~(\ref{refcount:allocate-1}), and (\ref{refcount:0-stays-0}).
+	} the object is eventually freed.
+\end{myrule}
+
+
+\begin{verbatim}
+	Object: TYPE = [#
+	    refcount: nat,
+	    free: bool
+	#]
+\end{verbatim}
+
+\begin{verbatim}
+	Address: TYPE = nat
+	
+	memory: [Address -> Object]
+\end{verbatim}
+
+
+\begin{exercise}
+	Consider \texttt{gc\_cycle\_4}.
+	What, if anything, would change if it was split into multiple functions, each mutating the global state one variable at a time?
+	Explain your answer.
+\end{exercise}
+
+\section{Big Data}\label{sec:big-data}
+
+Let's add data to our objects!
+How much data?
+A lot of data!
+Yes!
+No seriously, how much?
+I need to write the number of bytes to allocate for this buffer.
+Well, some people say it's gigabytes, some say it's exabytes, and others more reasonably say it's ``whatever doesn't fit in your RAM.''
+
+Let us not succumb to the major pitfall of the trendy big data: trying to define ``big.''
+Let's take a step back.
+We're trying to reason on the correctness of a memory management system.
+In particular, of an abstract system that can use an infinite amount of space!
+Try to beat infinity in your ``big data'' system.
+It turns out that with infinite space we could store a single bit per object and still have the possibility of encoding all the natural numbers.
+In fact, we don't even need that bit!
+We can encode whatever information we need simply in the address of one object.
+Since there can be an infinite amount of objects, there must be an infinite number of addresses.
+Assuming that the memory allocator gives out an object at a perfectly random address, after an infinite number of attempts, we will manage to get the object at the exact address that we need.
+
+Except of course if that object had been previously allocated.
+Alright, we do have this limitation, fair enough.
+But it can be easily solved!
+Let's add a pointer field to every object, such that if the pointer of object $\alpha$ points to the address of $\alpha$, then the semantics are those previously described: the object $\alpha$ encodes the number $\alpha$.
+Otherwise, if it points to another object $\beta$, then it means that $\alpha$ represents the number $\beta$.\footnote{%
+	This is a ludicrous introduction.
+	In fact, to store a pointer to an unbounded number of memory locations, it's necessary to store a pointer of infinite size.
+	Nevertheless, what follows does hold for garbage collection in general.
+}
+
+This poses a problem for our GC.
+If there exist two distinct objects $\alpha$ and $\beta$, such that $\alpha$ points to $\beta$, then $\beta$ cannot be freed before $\alpha$ is freed.

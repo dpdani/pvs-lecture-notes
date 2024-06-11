@@ -1,0 +1,135 @@
+(refcount
+ (dec_ref_4_TCC1 0
+  (dec_ref_4_TCC1-1 nil 3926673686 ("" (subtype-tcc) nil nil) nil nil
+   (dec_ref_4 subtype
+    "(number_fields.-)(refcount.s1`registers(refcount.t)(1), 1)"
+    "nat")))
+ (dec_ref_5_TCC1 0
+  (dec_ref_5_TCC1-1 nil 3926673686 ("" (subtype-tcc) nil nil) nil nil
+   (dec_ref_5 subtype
+    "(number_fields.-)(refcount.s1`registers(refcount.t)(1), 1)"
+    "nat")))
+ (collect_TCC1 0
+  (collect_TCC1-1 nil 3926676992 ("" (assert) (("" (tcc) nil nil)) nil)
+   ((real_le_is_total_order name-judgement "(total_order?[real])"
+     real_props nil)
+    (Thread type-eq-decl nil refcount nil)
+    (T formal-const-decl "{x: nat | x >= 1}" refcount nil)
+    (nat nonempty-type-eq-decl nil naturalnumbers nil)
+    (>= const-decl "bool" reals nil)
+    (int nonempty-type-eq-decl nil integers nil)
+    (integer_pred const-decl "[rational -> boolean]" integers nil)
+    (rational nonempty-type-from-decl nil rationals nil)
+    (rational_pred const-decl "[real -> boolean]" rationals nil)
+    (<= const-decl "bool" reals nil)
+    (real nonempty-type-from-decl nil reals nil)
+    (real_pred const-decl "[number_field -> boolean]" reals nil)
+    (number_field nonempty-type-from-decl nil number_fields nil)
+    (number_field_pred const-decl "[number -> boolean]" number_fields
+     nil)
+    (number nonempty-type-decl nil numbers nil)
+    (NOT const-decl "[bool -> bool]" booleans nil)
+    (bool nonempty-type-eq-decl nil booleans nil)
+    (boolean nonempty-type-decl nil booleans nil))
+   nil
+   (collect subtype "refcount.s1`gc_head"
+    "(list_adt[Address].cons?)")))
+ (gc_cycle_4_TCC1 0
+  (gc_cycle_4_TCC1-1 nil 3926674067 ("" (tcc) nil nil) nil nil
+   (gc_cycle_4 subtype "refcount.T" "upto[T]")))
+ (STW_wait_4_TCC1 0
+  (STW_wait_4_TCC1-1 nil 3926676992 ("" (subtype-tcc) nil nil) nil nil
+   (STW_wait_4 subtype
+    "(number_fields.-)(refcount.s1`registers(refcount.t)(1), 1)"
+    "upto[T]")))
+ (main_4_TCC1 0
+  (main_4_TCC1-1 nil 3926676992 ("" (cond-disjoint-tcc) nil nil)
+   ((boolean nonempty-type-decl nil booleans nil)
+    (bool nonempty-type-eq-decl nil booleans nil)
+    (NOT const-decl "[bool -> bool]" booleans nil)
+    (number nonempty-type-decl nil numbers nil)
+    (number_field_pred const-decl "[number -> boolean]" number_fields
+     nil)
+    (number_field nonempty-type-from-decl nil number_fields nil)
+    (real_pred const-decl "[number_field -> boolean]" reals nil)
+    (real nonempty-type-from-decl nil reals nil)
+    (<= const-decl "bool" reals nil)
+    (rational_pred const-decl "[real -> boolean]" rationals nil)
+    (rational nonempty-type-from-decl nil rationals nil)
+    (integer_pred const-decl "[rational -> boolean]" integers nil)
+    (int nonempty-type-eq-decl nil integers nil)
+    (>= const-decl "bool" reals nil)
+    (nat nonempty-type-eq-decl nil naturalnumbers nil)
+    (T formal-const-decl "{x: nat | x >= 1}" refcount nil)
+    (Thread type-eq-decl nil refcount nil)
+    (real_le_is_total_order name-judgement "(total_order?[real])"
+     real_props nil))
+   nil
+   (main_4 disjointness
+    "(COND refcount.s1`registers(refcount.t)(5) = 0 -> refcount.s2 = refcount.s1 WITH [(pc)(refcount.t) := 153], refcount.s1`registers(refcount.t)(5) = 1 -> refcount.s2 = refcount.s1 WITH [(pc)(refcount.t) := 168], refcount.s1`registers(refcount.t)(5) = 2 -> refcount.s2 = refcount.s1 WITH [(pc)(refcount.t) := 183], refcount.s1`registers(refcount.t)(5) = 3 -> refcount.s2 = refcount.s1 WITH [(pc)(refcount.t) := 203], ELSE -> refcount.s2 = refcount.s1 WITH [(pc)(refcount.t) := 146] ENDCOND)"
+    "nil")))
+ (main_5_TCC1 0
+  (main_5_TCC1-1 nil 3926676992 ("" (subtype-tcc) nil nil) nil nil
+   (main_5 subtype "refcount.s1`registers(refcount.t)(6)" "Variable")))
+ (main_8_TCC1 0
+  (main_8_TCC1-1 nil 3926676992 ("" (subtype-tcc) nil nil) nil nil
+   (main_8 subtype "refcount.s1`registers(refcount.t)(6)" "Variable")))
+ (main_9_TCC1 0
+  (main_9_TCC1-1 nil 3926676992 ("" (subtype-tcc) nil nil) nil nil
+   (main_9 subtype "refcount.s1`registers(refcount.t)(6)" "Variable")))
+ (main_10_TCC1 0
+  (main_10_TCC1-1 nil 3926676992 ("" (subtype-tcc) nil nil) nil nil
+   (main_10 subtype "refcount.s1`registers(refcount.t)(6)"
+    "Variable")))
+ (main_13_TCC1 0
+  (main_13_TCC1-1 nil 3926676992 ("" (subtype-tcc) nil nil) nil nil
+   (main_13 subtype "refcount.s1`registers(refcount.t)(6)"
+    "Variable")))
+ (main_14_TCC1 0
+  (main_14_TCC1-1 nil 3926676992 ("" (subtype-tcc) nil nil) nil nil
+   (main_14 subtype "refcount.s1`registers(refcount.t)(6)"
+    "Variable")))
+ (main_17_TCC1 0
+  (main_17_TCC1-1 nil 3926676992 ("" (subtype-tcc) nil nil) nil nil
+   (main_17 subtype "refcount.s1`registers(refcount.t)(6)"
+    "Variable")))
+ (main_20_TCC1 0
+  (main_20_TCC1-1 nil 3926676992 ("" (subtype-tcc) nil nil) nil nil
+   (main_20 subtype "refcount.s1`registers(refcount.t)(6)"
+    "Variable")))
+ (dec_ref_4_implies_dec_ref_2 0
+  (dec_ref_4_implies_dec_ref_2-1 nil 3926764713 ("" (postpone) nil nil)
+   nil shostak))
+ (init_implies_invariants 0
+  (init_implies_invariants-1 nil 3926678128 ("" (grind) nil nil)
+   ((Register type-eq-decl nil refcount nil)
+    (number nonempty-type-decl nil numbers nil)
+    (boolean nonempty-type-decl nil booleans nil)
+    (number_field_pred const-decl "[number -> boolean]" number_fields
+     nil)
+    (number_field nonempty-type-from-decl nil number_fields nil)
+    (real_pred const-decl "[number_field -> boolean]" reals nil)
+    (real nonempty-type-from-decl nil reals nil)
+    (rational_pred const-decl "[real -> boolean]" rationals nil)
+    (rational nonempty-type-from-decl nil rationals nil)
+    (integer_pred const-decl "[rational -> boolean]" integers nil)
+    (int nonempty-type-eq-decl nil integers nil)
+    (bool nonempty-type-eq-decl nil booleans nil)
+    (>= const-decl "bool" reals nil)
+    (Address type-eq-decl nil refcount nil)
+    (real_le_is_total_order name-judgement "(total_order?[real])"
+     real_props nil)
+    (NOT const-decl "[bool -> bool]" booleans nil)
+    (<= const-decl "bool" reals nil)
+    (nat nonempty-type-eq-decl nil naturalnumbers nil)
+    (T formal-const-decl "{x: nat | x >= 1}" refcount nil)
+    (Thread type-eq-decl nil refcount nil)
+    (Variable type-eq-decl nil refcount nil)
+    (NULL const-decl "Address" refcount nil)
+    (init const-decl "bool" refcount nil)
+    (rule_1 const-decl "bool" refcount nil)
+    (rule_6 const-decl "bool" refcount nil)
+    (rule_7 const-decl "bool" refcount nil)
+    (INV const-decl "bool" refcount nil))
+   shostak)))
+

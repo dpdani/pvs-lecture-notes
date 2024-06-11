@@ -1,0 +1,422 @@
+\chapter{Introduction}
+
+In this chapter we will introduce PVS (the Prototype Verification System),\footnote{%
+	\url{https://pvs.csl.sri.com/}
+} and we will install a modern environment for using PVS.
+Later, we'll also see how to prove some simple properties of a hashmap using PVS.
+
+
+\section{Introduction to PVS}
+
+PVS is a powerful tool designed for formal specification and verification of software and hardware systems.
+It is a language coupled with a complete environment for developing formal mathematical specifications and then verifying that those meet certain properties.
+
+PVS comes with an expressive specification language that allows you to describe your systems in a precise and formal manner.
+One of the core functionalities of PVS is its ability to prove theorems about your specifications.
+This involves using mathematical reasoning to demonstrate that certain properties hold true for your system under specified conditions.
+
+PVS includes a set of built-in libraries that cover a wide range of mathematical theories and common programming constructs. 
+These libraries provide a foundation for specifying and verifying a variety of systems.
+Notably among them, we can find NASALib,\footnote{%
+	\url{https://github.com/nasa/pvslib}
+} a vast set of libraries developed by the Formal Methods teams at the NASA Langley Research Center, along with the Stanford Research Institute, the National Institute of Aerospace, and the larger PVS community.
+
+PVS is often used to verify critical software systems where correctness is of utmost importance, such as avionics and aerospace software, medical devices, or other safety-critical applications.
+
+It is also extensively employed in the verification of hardware systems, and can be used to formally specify and verify communication protocols, cryptographic and concurrent algorithms, and other complex systems.
+
+
+\section{Installing PVS}
+
+The recommended development environment for PVS is NASA's plugin for Visual Studio Code:\footnote{%
+	\url{https://github.com/nasa/vscode-pvs}
+}
+
+\begin{enumerate}
+	\item download and install Visual Studio Code for your platform from \url{https://code.visualstudio.com/download};
+	\item navigate to the extensions tab in VS Code (the blocks icon at the left edge of the screen) and search for ``pvs'';
+	\item the first item in the list should be called ``PVS'' and authored by Paolo Masci;
+	\item click the install button and follow the on-screen installation instructions.
+\end{enumerate}
+
+Note that this procedure installs the PVS binaries and libraries in your system as well, at a path that you need to specify.
+
+To confirm that everything was installed correctly, open a new VS Code workspace; i.e. create and select a folder from your file system.
+Then, navigate to the newly appeared PVS tab at the left edge of the screen, right-click on the folder's name and select ``New PVS File.''
+In the new file insert the following content:
+
+\begin{verbatim}
+	hello: THEORY
+	  BEGIN
+
+	  world: CONJECTURE
+	    TRUE
+	END hello
+\end{verbatim}
+
+Now, right-click the name of the new file on the left panel and select ``Re-run All Proofs:'' you should see a new tab called \texttt{hello.summary} displaying the above conjecture \texttt{world} with the status \texttt{proved}.
+
+For further help installing this plugin, please refer to \url{https://github.com/nasa/vscode-pvs#installation-instructions}.
+
+
+\section{Proving Properties of a Hashmap}
+
+Let us introduce the core concepts and features of the PVS proof assistant with a commonly known data structure. We will try to prove a hashmap has the following features:
+
+\begin{enumerate}
+	\item it should be possible to insert a new (key, value) pair;
+	\item it should be possible, given a key, to retrieve its corresponding value; and
+	\item it should be possible to remove a (key, value) pair from the hashmap.
+\end{enumerate}
+
+Let's name these operations \emph{insert}, \emph{lookup}, and \emph{delete}.
+Since we'll be talking about keys, values and maps, we should let PVS know about them.
+Specifically, we introduce new \emph{uninterpreted} types; i.e. types that PVS knows nothing about: whether there would be 0, 1, or infinite instances of these types, for example.
+PVS instead is thus only told that a key \texttt{K} is something different from a value \texttt{V}.
+
+\begin{verbatim}
+	K: TYPE
+	V: TYPE
+\end{verbatim}
+
+Now we define what a hashmap is, and we use this notation:
+
+\begin{verbatim}
+	M: TYPE = [K -> V]
+\end{verbatim}
+
+This tells PVS that a hashmap \texttt{M} is a function from keys to values.
+We will later define this function as a sequence of associations.
+You can also think of this \texttt{TYPE} as an array of (key, value) pairs.\footnote{%
+	PVS also allows expressing exactly \emph{an array of tuples}, but it's able to reason very efficiently with functions, which is why we choose this representation.
+}
+
+We could define \texttt{M} as a partial function (that is, a function defined over a subset of its domain), but efficient theorem proving strongly encourages the use of total functions.
+One way to denote the fact that some $k \in K$ is not to be found in the hashmap, is to identify some particular value that indicates this.
+Let's choose an arbitrary element of \texttt{V}:
+
+\begin{verbatim}
+	null: V
+\end{verbatim}
+
+So that, we will expect a hashmap to be empty iff $\forall k \in K, m(k) = \texttt{null}$.
+We can write this in PVS too:
+
+\begin{verbatim}
+	empty: M
+	empty_ax: AXIOM
+	    FORALL (k: K): empty(k) = null
+\end{verbatim}
+
+We have declared a hashmap to be the \emph{one} empty hashmap, and we have axiomatically defined \texttt{empty} as the hashmap in which all keys point to \texttt{null}.
+This may surprise a programmer who's used to think that there may be multiple instances of a hashmap class that all happen to be empty.
+From the point of view of PVS, though, all those instances are exactly the same.
+A program may distinguish them based on their memory address, but PVS has no notion of this, instead it only knows abstractly about the types we have defined so far.
+Think of it mathematically instead of programmatically: the number 0 is exactly the number 0 no matter how many times we may write it on a piece of paper.
+
+Also, do not consider the axiom itself to be computationally expensive since it associates \texttt{null} to the entire key space.
+Quite the contrary: in the carrying out of a proof, PVS will know that whatever we may write next, the value of any key in \texttt{empty} will be \texttt{null}, without employing any memory to store the possible associations.
+
+Now, let's ``implement'' the hashmap operations:
+
+\begin{verbatim}
+	lookup: [M, K -> V]
+	lookup_ax: AXIOM FORALL (m: M) (k: K):
+	    lookup(m, k) = m(k)
+	
+	insert: [M, K, V -> M]
+	insert_ax: AXIOM FORALL (m: M) (k: K) (v: V):
+	    insert(m, k, v) = m WITH [(k) := v]
+	
+	delete: [M, K -> M]
+	delete_ax: AXIOM FORALL (m: M) (k: K):
+	    delete(m, k) = m WITH [(k) := null]
+\end{verbatim}
+
+Notice some of the notations we have used so far: \texttt{m(k)} is exactly equivalent to the mathematical notation of function application, the \texttt{AXIOM} and \texttt{FORALL} keywords refer to their usual meanings, and the keyword \texttt{WITH} has been used to add an association to the function \texttt{m} above.
+
+Also, notice the \emph{functional} specification style: we pass the whole ``state of the system'' (i.e. the entire hashmap) to the functions \texttt{lookup}, \texttt{insert}, and \texttt{delete}.
+Consider \texttt{insert}: the input hashmap is somehow discarded in the operation and we instead ``return'' a novel hashmap that has the added association.
+As previously said, do not consider that PVS will actually allocate and deallocate memory to represent these hashmaps.
+
+If we were programming a hashmap and we felt content of what we wrote, we may turn to writing tests.
+But with PVS we instead want to write theorems about our hashmaps: they are general statements that we think should be true if our specification does what it ought to.
+This can provide much more information than a single test case, since with one theorem we would be running an entire \emph{class} of test cases.
+
+A suitable challenge for our specification may be: ``if I add a key \texttt{k} with a value \texttt{v} to a hashmap and then I lookup \texttt{k}, I should get back \texttt{v}.''
+We can write it as:
+
+\begin{verbatim}
+	insert_then_lookup: CONJECTURE FORALL (m: M) (k: K) (v: V):
+	    lookup(insert(m, k, v), k) = v
+\end{verbatim}
+
+In your VS Code editor, you should see some links above the definition of \texttt{insert\_then\_lookup}. We invoke the prover by clicking ``prove'':
+
+\begin{verbatim}
+	Starting prover session for insert_then_lookup
+	
+	
+	insert_then_lookup :
+	
+	|-------
+	{1}   FORALL (m: M) (k: K) (v: V): lookup(insert(m, k, v), k) =
+	v
+	
+	>>  
+\end{verbatim}
+
+This is a \emph{sequent}: in general there will be several numbered formulas above the turnstile symbol \texttt{|-------} (antecedent), and several below (consequent).
+The idea is that we have to establish that the conjunction (and) of formulas in the antecedent implies the disjunction (or) of the formulas in the consequent.
+Therefore, a sequent is true if any antecedent is the same as any consequent, if any antecedent is false, or if any consequent is true.
+
+The prompt indicates that PVS is waiting for us to submit a prover command, in Lisp syntax.
+The commands provided by PVS can be categorized as basic commands and strategies, which in turn are compositions of basic commands.
+Let us disregard enumerating all of the various commands available and their semantics during this introduction (they will be explored later in \S ???) and let us instead introduce a few commands and consider how a proof with PVS can be carried out in general.
+
+The highest-level strategy is called \texttt{grind}. It does skolemization, heuristic instantiation, propositional simplification, if-lifting, rewriting, and applies decision procedures for linear arithmetic and equality.
+It can take several optional arguments to specify the formulas that can be used for automatic rewriting (below, we'll be specifying that it can use the axioms in the theory \texttt{hashmap}).
+
+Following the execution of a command, PVS may be required to split the proof into two or more parts.
+The PVS prover itself maintains a proof tree; the act of proving the specification can be thought of as traversing the tree, with the goal of showing that each leaf of the tree is true.
+
+The \texttt{grind} strategy satisfies the proof for \texttt{insert\_then\_lookup}:
+
+\begin{verbatim}
+	>> (grind :theories ("hashmap"))
+	
+	Q.E.D.
+\end{verbatim}
+
+Following the display of \texttt{Q.E.D.}, you should see a pop-up indicating that the proof has been saved.
+We will mostly run our proofs in the interactive environment, but after a proof is successfully completed, it can be re-run in batch mode, without user interactions.
+Interactive proofs can also be suspended with \texttt{(quit)} and later resumed.
+
+In the example shown above the proof tree had just one trivial branch. Now let's turn to another less trivial conjecture:
+
+\begin{verbatim}
+	insert_then_delete: CONJECTURE FORALL (m: M), (k: K), (v: V):
+	    delete(insert(m, k, v), k) = m
+\end{verbatim}
+
+Intuitively, the above states that inserting a key \texttt{k} into a hashmap \texttt{m} and then deleting \texttt{k}, yields \texttt{m} unchanged.
+The first proof went very smoothly, let's see about this one.
+The same strategy used before produces the following result:
+
+
+\begin{verbatim}
+	Starting prover session for insert_then_delete
+	
+	
+	insert_then_delete :
+	
+	|------- 
+	{1}   FORALL (m: M), (k: K), (v: V): delete(insert(m, k, v), k)
+	= m
+	
+	>> (grind :theories ("hashmap"))
+	
+	
+	Trying repeated skolemization, instantiation, and if-lifting
+	
+	insert_then_delete :
+	
+	|-------
+	{1}   m!1 WITH [(k!1) := null] = m!1
+	
+	>> 
+\end{verbatim}
+
+The identifiers with \texttt{!} in them are Skolem constants---arbitrary representatives for quantified variables.
+Notice that PVS has already simplified away one of the two \texttt{WITH} expressions: if it only substituted the axioms, it could have equivalently written \texttt{m!1 WITH [(k!1) := v!1] WITH [(k!1) := null] = m!1}.
+
+The resulting sequent is requesting us to prove that two functions (i.e. hashmaps) are equal.
+We try to appeal to the principle of extensionality, which states that two functions are equal if their values are the same for every point of their domains:
+
+\begin{verbatim}
+	>> (apply-extensionality)
+	
+	
+	Applying extensionality
+	
+	insert_then_delete :
+	
+	|-------
+	{1}   m!1 WITH [(k!1) := null](x!1) = m!1(x!1)
+	[2]   m!1 WITH [(k!1) := null] = m!1
+	
+	>> (delete 2)
+	
+	
+	Deleting some formulas
+	
+	insert_then_delete :
+	
+	|-------
+	[1]   m!1 WITH [(k!1) := null](x!1) = m!1(x!1)
+	
+	>> 
+\end{verbatim}
+
+At any point we can invoke the \texttt{delete} command to remove an element of a sequent; here the original formula was deleted to reduce clutter, since it is equivalent to the  more interesting extensional form.\footnote{%
+	Recall that to prove a sequent we need to prove that the conjunction of the antecedents implies the disjunction of the consequents.
+}
+
+This sequent is asking us to show that the value associated with an arbitrary key \texttt{x!1} is the same before and after \texttt{m} was updated for \texttt{k!1}.
+We can do a case analysis here to consider whether $\texttt{x!1} = \texttt{k!1}$.
+
+\begin{verbatim}
+	>> (lift-if)
+	
+	
+	Lifting IF-conditions to the top level
+	
+	insert_then_delete :
+	
+	|-------
+	{1}   IF x!1 = k!1 THEN null = m!1(x!1) ELSE TRUE ENDIF
+	
+	>> (ground)
+	
+	
+	Applying propositional simplification and decision procedures
+	
+	insert_then_delete :
+	
+	{-1}   x!1 = k!1
+	|-------
+	{1}   null = m!1(x!1)
+	
+	>> 
+\end{verbatim}
+
+Let's look closely at this sequent: it is asking to demonstrate that if $x_1 = k_1$, then $m_1(x_1) = \texttt{null}$, but modus ponens, we also are trying to show that $m_1(k_1) = \texttt{null}$.
+That is, that the hashmap's value for $k_1$ was \texttt{null} before we inserted $k_1$.
+But it doesn't necessarily have to be so!
+If the value associated with $k_1$ was a non-null value, say $v_2$, then the \texttt{insert} operation \emph{updates} the association and the later \texttt{delete} associates $k_1$ to \texttt{null}.
+Thus, our conjecture (that the hashmap is unchanged following an \texttt{insert} + \texttt{delete}) is true only under the assumption that the key we add to the hashmap wasn't already in the hashmap (i.e. $m(k) = \texttt{null}$).
+
+If we change our conjecture to
+\begin{verbatim}
+	insert_then_delete: CONJECTURE FORALL (m: M), (k: K), (v: V):
+	    lookup(m, k) = null => delete(insert(m, k, v), k) = m
+\end{verbatim}
+then, we can prove it with
+\begin{verbatim}
+	(grind :theories ("hashmap"))
+	(apply-extensionality)
+	(delete 2)
+	(grind :theories ("hashmap"))
+\end{verbatim}
+
+
+\subsection{Axiomatic Issues}
+
+Let's now introduce two seemingly innocuous axioms, extending our specification the same way we have done before:
+
+\begin{verbatim}
+	is_in?: [M, K -> bool]
+	is_in_ax: AXIOM FORALL (m: M), (k: K):
+	    m(k) /= null
+	
+	insert_is_in_ax: AXIOM FORALL (m: M), (k: K), (v: V):
+	    is_in?(insert(m, k, v), k)
+\end{verbatim}
+
+The semantics of these axioms should be fairly self-explanatory: a key is in the hashmap if it is not null, and after inserting some key $k$ in a hashmap \texttt{m}, \texttt{k} is in \texttt{m}.
+
+But these axioms hide an inconsistency!
+
+\begin{exercise}
+	Prove, without using PVS, that true = false, based on the axioms provided so far.
+	
+	\emph{Hint}: start from \texttt{is\_in?(insert(empty, k, null), k)}.
+\end{exercise}
+
+In fact, it shouldn't be possible that after associating a key $k$ with \texttt{null}, we find that the value associated with $k$ is not \texttt{null}!
+We have clearly abused axiomatic definitions and PVS will happily run this impossible proof for us, given that the inconsistency is within the axioms themselves, that PVS assumes to hold.
+We'll see later how to avoid abusing axioms, but for now, let's try to carry out the exercise proof using PVS.
+
+\begin{verbatim}
+	Starting prover session for what
+	
+	
+	what :
+	
+	|-------
+	{1}   FORALL (k: K): is_in?(insert(empty, k, null), k)
+	
+	>> (skolem!)
+	
+	
+	Skolemizing
+	
+	what :
+	
+	|-------
+	{1}   is_in?(insert(empty, k!1, null), k!1)
+	
+	>> (use "insert_ax")
+	
+	
+	Using lemma insert_ax
+	
+	what :
+	
+	{-1}   insert(empty, k!1, null) = empty WITH [(k!1) := null]
+	|-------
+	[1]   is_in?(insert(empty, k!1, null), k!1)
+	
+	>> (use "is_in_ax")
+	
+	
+	Using lemma is_in_ax
+	
+	what :
+	
+	{-1}   insert(empty, k!1, null)(k!1) /= null
+	[-2]   insert(empty, k!1, null) = empty WITH [(k!1) := null]
+	|-------
+	[1]   is_in?(insert(empty, k!1, null), k!1)
+	
+	>> (use "empty_ax")
+	
+	
+	Using lemma empty_ax
+	
+	what :
+	
+	{-1}   empty(k!1) = null
+	[-2]   insert(empty, k!1, null)(k!1) /= null
+	[-3]   insert(empty, k!1, null) = empty WITH [(k!1) := null]
+	|-------
+	[1]   is_in?(insert(empty, k!1, null), k!1)
+	
+	>> (ground)
+	
+	Q.E.D.
+\end{verbatim}
+
+The complete \texttt{.pvs} file for this example can be found in \S\ref{sol:simple-hashmap}.
+
+
+\section{Exercises}
+
+\begin{exercise}\label{ex:chapter1-1}
+	Encode in PVS grammar the following properties of natural numbers, without proving them.
+	Note that in PVS to denote that a variable is a natural number, we write e.g. \texttt{FORALL (n: nat)}.
+	
+	\begin{enumerate}
+		\item Let $n \in \mathbf{N}$, $n > 5 \Rightarrow n > 10$.
+		
+		\item Let $x, y, z \in \mathbf{N}$. If $x = y + z$, then $x^2 = yx + zx$, $xy = y^2 + zy$, and $xz = z^2 + yz$.
+		
+		\item Let $x, y, z \in \mathbf{N}$. If $x = y + z$ and the above formulae hold, then $x^2 = y^2 + z^2 + 2yz$, and $(y + z)^2 = y^2 + z^2 + 2yz$.
+	\end{enumerate}
+
+	What happens when you try to prove these properties using \texttt{(grind)}?
+\end{exercise}
+
+%\begin{longtable}{p{.5\textwidth}p{.5\textwidth}} 
+%	\texttt{\lipsum[1]} & \lipsum[2] \\
+%\end{longtable}
