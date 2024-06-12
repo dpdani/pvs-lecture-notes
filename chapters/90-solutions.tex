@@ -7,11 +7,14 @@
 \section{Exercise \ref{ex:chapter1-1}}
 \lstinputlisting{exercises/02chapter1exercises.pvs}
 
-\section{Chapter \ref{ch:concurrent-reference-counting} Pseudocode}
-\lstinputlisting{exercises/02 refcount.c}
+\section{Chapter \ref{ch:concurrent-reference-counting} Pseudocode}\label{sec:refcount-full-pseudocode}
+\lstinputlisting[numbers=left, stepnumber=5, numberfirstline=true]{exercises/02 refcount.c}
 
-\section{Chapter \ref{ch:concurrent-reference-counting} Solution}
+\section{Exercise \ref{ex:gc-cycle-4}}
+%Not much would change.
+%Looking at the pseudocode, we can see that the concurrency-relevant parts had been already taken care of in other steps.
+%That is, the ``locking'' and ``unlocking'' sequences are not involved in this line.
+%Therefore, adding more details in this part would only serve to model the behavior of the runtime execution overly precisely.
+
+\section{Chapter \ref{ch:concurrent-reference-counting} PVS Specification}\label{sec:refcount-full-pvs-specification}
 \lstinputlisting{exercises/02 refcount.pvs}
-
-\section{hesselink}
-\lstinputlisting{/home/dp/repos/thesis/pvs/hashtable7.pvs}

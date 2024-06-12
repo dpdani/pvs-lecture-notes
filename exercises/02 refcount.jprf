@@ -412,7 +412,7 @@
     "formula": "init_implies_invariants",
     "status": "proved",
     "prover": "PVS 7.1.0 (Allegro CL Enterprise Edition)",
-    "shasum": "bd7fdc3b54ac9f08d762cfbb80a46c7e3558abc55dfce98394cf5fc94c24354d"
+    "shasum": "06aeeadd9a70f31f362f677cdb7ca2d565fa89ef31380ce4cfd4857881f5766c"
    },
    "origin": ".prf",
    "proofTree": {

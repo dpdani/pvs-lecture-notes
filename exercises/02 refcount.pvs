@@ -2,12 +2,12 @@ refcount[T: {x: nat | x >= 1}]: THEORY
 BEGIN
 
     Object: TYPE = [#
-        refcount: nat,
+        refcount: int,
         allocated: bool,
         freed: bool
     #]
 
-    Address: TYPE = nat
+    Address: TYPE = int
     NULL: Address = 0
 
     Register: TYPE = upto[10]
@@ -26,14 +26,14 @@ BEGIN
     State: TYPE = [#
         memory: [Address -> Object],
 
-        registers: [Thread -> [Register -> nat]],
-        variables: [Thread -> [Variable -> Address]],
+        registers: [Thread -> [int -> int]],
+        variables: [Thread -> [int -> int]],
 
         gc_head: GC,
 
         STW_world_stopped: bool,
         STW_requested: bool,
-        STW_count_down: upto[T],
+        STW_count_down: int,
 
         pc: [Thread -> nat]
     #]
@@ -58,7 +58,7 @@ BEGIN
         )
     )
 
-    free(t, s1, s2): bool = s1`pc(t) = 38 and (
+    free(t, s1, s2): bool = s1`pc(t) = 36 and (
         if s1`memory(s1`registers(t)(0))`freed = false then
             s2 = s1 with [
                 (memory)(s1`registers(t)(0)) := s1`memory(s1`registers(t)(0)) with [
@@ -440,7 +440,7 @@ BEGIN
     )
 
     main_16(t, s1, s2): bool = s1`pc(t) = 188 and (
-        if not s1`memory(s1`registers(t)(7))`allocated then
+        if (not s1`memory(s1`registers(t)(7))`allocated) or (s1`memory(s1`registers(t)(7))`freed) then
             s2 = s1 with [
                 (pc)(t) := 146
             ]
@@ -561,31 +561,53 @@ BEGIN
         or error(t, s1, s2)
 
 
+    % psuedo-type-checking invariants
+    refcounts_non_neg(s): bool =
+        forall (a: Address):
+            s`memory(a)`refcount >= 0
+
+
     % state invariants
-    init(s): bool =
-        forall (a: Address, t: Thread, r: Register, v: Variable): (
+    init_empty_memory(s): bool =
+        forall (a: Address):
             s`memory(a) = (# refcount := 0, allocated := false, freed := false #)
-            and s`registers(t)(r) = NULL
-            and s`variables(t)(v) = NULL
-            and s`pc(t) = 146
-        ) and (
-            s`gc_head = null
-            and s`STW_world_stopped = false
-            and s`STW_requested = false
-            and s`STW_count_down = T
-        )
+
+    init_empty_registers(s): bool =
+        forall (t: Thread, r: Register):
+            s`registers(t)(r) = NULL
+
+    init_empty_variables(s): bool =
+        forall (t: Thread, v: Variable):
+            s`variables(t)(v) = NULL
+
+    init_starting_pc(s): bool =
+        forall (t: Thread):
+            s`pc(t) = 146
+
+    init(s): bool =
+        true
+        and init_empty_memory(s)
+        and init_empty_registers(s)
+        and init_empty_variables(s)
+        and init_starting_pc(s)
+        and s`gc_head = null
+        and s`STW_world_stopped = false
+        and s`STW_requested = false
+        and s`STW_count_down = T
 
     rule_1(s): bool =
         forall (t: Thread):
             pc(s)(t) = 154 => memory(s)(registers(s)(t)(0)) = (# refcount := 1, allocated := true, freed := false #)
-    
+
     % rule_3(s1, s2): bool =
     %     forall (t: Thread):
     %         pc(s1)(t) = 44 => 
 
+    % rule_5(s): bool =
+
     rule_6(s): bool =
         forall (t: Thread):
-            pc(s)(t) = 38 => (
+            pc(s)(t) = 36 => (
                 s`memory(s`registers(t)(0))`refcount = 0
                 and s`memory(s`registers(t)(0))`freed = false
                 and s`memory(s`registers(t)(0))`allocated = true
@@ -594,13 +616,16 @@ BEGIN
     rule_7(s): bool =
         forall (t: Thread, v: Variable):
             variables(s)(t)(v) /= NULL => memory(s)(variables(s)(t)(v))`freed = false
-    
+
     not_in_error_state(s): bool =
         forall (t: Thread):
             pc(s)(t) /= 211
 
+
     INV(s): bool =
-        rule_1(s)
+        true
+        % and refcounts_non_neg(s)
+        and rule_1(s)
         and rule_6(s)
         and rule_7(s)
         and not_in_error_state(s)
@@ -610,9 +635,9 @@ BEGIN
     dec_ref_4_implies_dec_ref_2: LEMMA
         forall (t: Thread): forall(s1: State, s2: State):
             (
-                INV(s1) and s1`pc(t) = 79 and s1`registers(t)(1) /= 0 and step(t, s1, s2)
+                INV(s1) and s1`pc(t) = 79 and s1`registers(t)(1) > 0 and step(t, s1, s2)
             ) => (
-                INV(s2) and s2`pc(t) = 83 and s2`registers(t)(1) /= 0
+                INV(s2) and s2`pc(t) = 83 and s2`registers(t)(1) > 0
             )
 
 

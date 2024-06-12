@@ -87,11 +87,11 @@ void dec_ref()
         GC *gc = new GC();  // simplified as one atomic operation in `dec_ref_7`
 
         gc->obj = obj;
-        gc->next = gc_head;
+        gc->next = NULL;
 
-        gc_tail = gc_head;
         do {
-            while (gc_tail->next != NULL) {
+            gc_tail = gc_head;
+            while (gc_tail != NULL) {
                 gc_tail = gc_tail->next;
             }
         } while (!CAS(gc_tail->next, NULL, gc);
@@ -132,7 +132,7 @@ void STW_wait()
 
     if (STW_requested) {
         do {
-            count_down = STW_count_down;
+            int count_down = STW_count_down;
         } while (!CAS(STW_count_down, count_down, count_down - 1));
 
         while (STW_requested || STW_world_stopped) { }
@@ -180,12 +180,12 @@ int main()
             registers[0] = NULL;
             break;
         case 2:  // inc_ref
-            if (registers[variable] != NULL) {
+            if (variables[variable] != NULL) {
                 break;
             }
 
             object *obj = choose();  // registers[7]
-            if (!obj->allocated) {
+            if (!obj->allocated || obj->freed) {
                 break;
             }
 

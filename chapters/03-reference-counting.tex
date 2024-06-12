@@ -1,23 +1,5 @@
 \chapter{Concurrent Reference Counting}\label{ch:concurrent-reference-counting}
 
-\begin{itemize}
-	\item shared memory is an array of objects
-	\item objects have a reference count (and nothing else) $\Rightarrow$ cannot have reference cycles
-	
-	\item prove that:
-	\begin{itemize}
-		\item objects reaching refs = 0 are freed (flag)
-		\item ($\star$) no thread tries to incref a freed object $\Rightarrow$ impossible $\Rightarrow$ necessity of GC
-	\end{itemize}
-
-	\item introduce a GC: a thread decides to be the GC (non-determinism)
-	\item prove ($\star$)
-	
-	\item objects have a ``data'' field: a reference to another object $\Rightarrow$ cycles
-	
-	\item prove that every object is eventually freed
-\end{itemize}
-
 Let us now go through a more interesting specification: one that deals with concurrent memory management.
 In this chapter we'll practice ...
 
@@ -29,7 +11,7 @@ Of course, memory is more complicated than this: there is virtual memory, kernel
 In here, we cannot go in so deep as to take all of these different kinds of memory into consideration.
 Instead, we'll be specifying the memory for one single process, as if all the rest is not there.
 
-Another assumption we'll make is that the machine memory is unbounded.
+Another assumption we'll make is that the machine memory is unbound\-ed.
 This sort of makes memory management redundant, but here we're interested in specifying the behavior of a management system irrespective of the amount of memory it can dispose of.
 
 We can be free to add this constraint later, and we will, after we dealt with the other issues that will come up shortly.
@@ -114,45 +96,605 @@ Let us add more rules to deal with these problems.
 	} the object is eventually freed.
 \end{myrule}
 
+\section{Pseudocode}\label{sec:pseudocode}
+
+In this section we'll be constructing a program in C-like pseudocode to use as a reference for what we intend to specify later in PVS\@.
+Some base-level C knowledge is required to read this section.
+
+First, we can easily declare our object, which we'll be using throughout our pseudocode.
 
 \begin{verbatim}
-	Object: TYPE = [#
-	    refcount: nat,
-	    free: bool
-	#]
+	typedef struct {
+	    int refcount;
+	    bool allocated;
+	    bool freed;
+	} object;
 \end{verbatim}
 
+It is a very simple abstraction for an object.
+Remember as we've said previously, we don't want to actually store any kind of data in this object.
+We'll be doing it later.
+So, for now, we only care about an object's reference count (the \texttt{refcount} field).
+We also add two flags which are only used to simplify our specification: in a real system the fact that a portion of memory is allocated or free is stored in kernel data structures (and possibly also in user-space when a memory management system is employed).
+We do not care about those details here.
+Instead, we attach this information to the objects themselves.
+It would be of course a significant waste in space, but we have an infinite amount of it here ;)
+
+Next, we'll be doing something weird.
+Each thread has its own set of registers, which we can imagine as its current view of the shared memory.
+As you may know, in C there is no direct access to registers,\footnote{%
+	Unless you embed assembly code.
+} the mapping of variables to registers is left to the compiler.
+So, in order to make clear the usage of registers by a thread, we introduce an explicit \texttt{registers} array:
 \begin{verbatim}
-	Address: TYPE = nat
-	
-	memory: [Address -> Object]
+	object *registers[10] = {NULL, NULL, NULL, NULL,
+	    NULL, NULL, NULL, NULL, NULL, NULL};
 \end{verbatim}
 
+Another thing we generally don't get to see is the stack.
+Memory on the heap is explicitly allocated in a C program, but not the variables that are allocated onto the stack.
+Again, we want to make it clear that a thread is viewing a certain set of variables:
+\begin{verbatim}
+	object *variables[10] = {NULL, NULL, NULL, NULL,
+	    NULL, NULL, NULL, NULL, NULL, NULL};
+\end{verbatim}
+
+Both of these arrays should be thought of as thread-local storage, with each thread seeing a different array.
+This is implicit in the pseudo program, because we avoid explicitly starting threads.
+
+With the above definition of an object, the \texttt{free} routine becomes straight-forward, beacuse we just need to set the \texttt{freed} flag:
+\begin{verbatim}
+	void free()
+	{
+	    CAS(registers[0]->freed, false, true);
+	}
+\end{verbatim}
+
+There are a couple of things to note here.
+First, we're using a \texttt{CAS} function, which we don't declare nor define, that denotes the usage of a hardware compare-and-set instruction to perform this write to memory.
+This pseudo-function returns a boolean value, which we just don't care to look at here.
+We'll take care of the fact that the object wasn't already freed by other means.
+
+Second, this routine takes no input parameters, while the usual C \texttt{free} function does require the pointer to the memory that needs to be freed.
+Here, we're making a choice to simplify further the PVS specification that will follow.
+Instead of specifying that there is a parameter, we assume that the parameter is in register number 0.
+Note that this is not a PVS-specific way of doing this, we're just making this deliberate choice on how we model a real program execution.
+
+Next, the allocation routine:
+\begin{verbatim}
+	void alloc()
+	{
+	    do {
+	        object *obj = choose();
+	    } while (!CAS(obj->allocated, false, true));
+	    obj->refcount = 1;
+	    registers[0] = obj;
+	}
+\end{verbatim}
+
+Weirdness abounds.
+Let's break it down.
+First, the signature is again unexpected.
+Again, the reason is simplifying the PVS specification: instead of specifying a return mechanism we rely on the assumption that the returned value is found in register number 0, instead of actually modeling the return register.
+
+Then, what's that \texttt{choose()} doing?
+As said, \texttt{malloc} and the like have special data structures that are used to determine which address in memory is the next free address that can be allocated, but we don't care to map it to our specification.
+So, instead, we ``choose'' an address.
+That is, we \emph{non-deterministically} pick one at random until we find an object that wasn't already allocated.
+Non-determinism is certainly not a characteristic usually found in computer programs.
+You can think of it as a non-deterministic Turing machine that outputs a random address.
+With non-determinism, we can also ``be lucky'' and find a non-allocated object on our first try.
+Which is exactly what we'll do later in the PVS specification.
+Here, the check inside the while is kept in order to be clear about the state of \texttt{obj} after the loop.
+
+Now we define the reference count increment and decrement routines, and we'll look at them together, given that they're pretty similar:
+\begin{verbatim}
+	void inc_ref()
+	{
+	    object *obj = registers[0];
+
+	    do {
+	        int refcount = obj->refcount;  // registers[1]
+
+	        if (obj->refcount == 0) {
+	            registers[0] = NULL;
+	            return;
+	        }
+	    } while (!CAS(obj->refcount, refcount, refcount + 1));
+	}
+
+	void dec_ref()
+	{
+	    object *obj = registers[0];
+
+	    do {
+	        int refcount = obj->refcount;
+
+	        if (obj->refcount == 0) {
+	            registers[0] = NULL;
+	            return;
+	        }
+	    } while (!CAS(obj->refcount, refcount, refcount - 1));
+	    refcount--;
+
+	    if (refcount == 0) {
+	        free(obj);
+	    }
+	}
+\end{verbatim}
+
+These two routines shouldn't be very surprising, given what we've already seen so far.
+In both, we read the current reference count of the input object and attempt to modify it accordingly.
+In case we fail, because another thread modified the count concurrently, we read it again and retry.
+This should be the expected way to correctly implement a concurrent counter.
+
+The decrement routine also takes care of freeing the object in case its reference count reaches 0.
+This leads to a subtle problem.
+Consider this execution: two threads $t_1$ and $t_2$ are respectively trying to incref and decref a shared object $x$.
+Both read $\mathrm{refcount}(x) = 1$.
+$t_2$ proceeds before $t_1$ and decrements the reference count.
+Additionally, $t_2$ executes the call to \texttt{free} before $t_1$ attempts to CAS the reference count.
+The object has thus been freed before $t_1$ executes the CAS\@.
+When $t_1$ tries to execute the CAS, it breaks Rule~(\ref{refcount:use-after-free}).
+
+We have thus determined that the decref routine cannot also take care of freeing the object that has reached a reference count of 0.
+In fact, if it was also done inside the same routine, the thread executing it would need to wait for an indefinite amount of time before executing free.
+Instead, we'll employ a scheme known as Quiescent State Based Reclamation (QSBR): we'll defer the call to free until we know no thread is trying to access objects that have $\mathrm{refcount}(x) = 0$.
+That is, we need a Garbage Collector (GC).
+
+Instead of calling \texttt{free} in \texttt{dec\_ref}, we append the decref'ed object to a GC tracking list.
+When the GC will run a collection cycle, the tracked objects will be freed.
+
+Let's add the GC structures at the top of our pseudocode:
+\begin{verbatim}
+	extern int T;  // number of threads (T >= 1)
+
+	// ...
+
+	typedef struct GC {
+	    object *obj;
+	    struct GC *next;
+	} GC;
+
+	GC *gc_head = NULL;
+	bool STW_world_stopped = false;  // stop the world
+	bool STW_requested = false;
+	int STW_count_down = T;
+\end{verbatim}
+
+As you can already see, we'll be implementing a very simple stop-the-world GC later, based on a single linked list of tracked objects to be freed.
+For now, the result is that inside the \texttt{dec\_ref} function we replace the call to free with the following linked-list append:
+\begin{verbatim}
+	GC *gc = new GC();
+
+	gc->obj = obj;
+	gc->next = NULL;
+
+	do {
+	    gc_tail = gc_head;
+	    while (gc_tail != NULL) {
+	        gc_tail = gc_tail->next;
+	    }
+	} while (!CAS(gc_tail->next, NULL, gc);
+\end{verbatim}
+
+A very simple GC cycle can be implemented like this:
+\begin{verbatim}
+	void collect()
+	{
+	    GC *gc = gc_head;
+
+	    while (gc != NULL) {
+	        free(gc->obj);
+	        gc = gc->next;
+	    }
+
+	    gc_head = NULL;
+	}
+\end{verbatim}
+
+As you can see, it's a very trivial list traversal algorithm which calls \texttt{free}.
+The complexity will stem from the stop-the-world part of this GC\@.
+When a thread becomes the GC (i.e.\ initiates a GC cycle), it will need to make sure that no other thread is executing an incref or a decref.
+As said, it will do so by locking all other threads out of execution.
+The mechanism is not very complicated: first we signal all threads that a stop-the-world (STW) request has occurred, then we wait for all other threads to acknowledge the request, and finally we signal that we have successfully stopped the world.
+After the call to collect completes, we reset the STW state.
+\begin{verbatim}
+	void gc_cycle()
+	{
+	    if (!CAS(STW_requested, false, true)) {
+	        return;
+	    }
+
+	    while (STW_count_down - 1 > 0) { }  // wait for all threads
+	                                        // (except this one)
+	    STW_world_stopped = true;
+
+	    collect();
+
+	    STW_count_down = T;
+	    STW_requested = false;
+	    STW_world_stopped = false;  // resume the world
+	                                // (must be last)
+	}
+\end{verbatim}
 
 \begin{exercise}
+	Based on the above \texttt{gc\_cycle} routine come up with a \texttt{STW\_wait} routine, in pseudocode, that performs its counterpart: it is called by all the threads that did not attempt to request a STW operation, and possibly makes them wait for the STW operation to complete before returning.
+	A solution can be found in~\S\ref{sec:refcount-full-pseudocode}.
+\end{exercise}
+
+Finally, we need to write a \texttt{main} function that is the entry point of all threads.
+Again, we're not going to explicitly start any thread, we simply assume that $T$ threads start executing the \texttt{main} function.
+In particular, we want it to be an infinite loop over the possible operations that a thread can do: allocate, decref, or incref an object, or start a GC cycle.
+No program would exactly behave like this, but this is a close-enough model.
+A real program would have some possibly complicated logic on what actions it needs to take, but from the point of view of a memory management system, all that logic is transparent.
+Such system would only be able to observe the program continuously requesting one of those operations that we just mentioned.
+Therefore, a \texttt{while (true) \{ switch (operation) \{\ldots\} \}} loop is already a sufficiently detailed representation of a program that uses our concurrent memory management system.
+Thus, the beginning of our \texttt{main} function can look like this:
+\begin{verbatim}
+	int main()
+	{
+	    while (true) {
+	        STW_wait();  // maybe wait if the world is stopped,
+	                     // or if a stop is requested
+
+	        int action = choose();  // registers[5]
+	        int variable = choose();  // registers[6]
+
+	        switch (action) {
+\end{verbatim}
+
+We make again use of non-determinism: the action and the variable upon which the action is performed are chosen at random.
+For our purposes, this pseudocode maps to a situation in which PVS needs to make sure that our proofs hold for whichever value \texttt{action} and \texttt{variable} may take, which is exactly what we want.
+Next we go through the four possible actions: \texttt{alloc}, \texttt{dec\_ref}, \texttt{inc\_ref}, and \texttt{GC}.
+The order in which we do so, and the integer numbers we map the actions to, is completely arbitrary.
+\begin{verbatim}
+	case 1:  // dec_ref
+	    if (variables[variable] == NULL) {
+	        break;
+	    }
+
+	    registers[0] = variables[variable];
+	    dec_ref();
+
+	    if (registers[0] == NULL) {
+	        goto error;
+	    }
+
+	    variables[variable] = NULL;
+	    registers[0] = NULL;
+	    break;
+\end{verbatim}
+
+Notice how we first check that the chosen variable makes sense: that it actually holds a reference to an object.
+Given that we're using non-determinism, we need to make sure that we didn't non-deterministically choose something that would break our logic.
+In this case, we don't want to decref \texttt{NULL}.
+Then, in keeping with our calling convention, we populate register 0 to pass the argument to the \texttt{dec\_ref} function.
+If it returned \texttt{NULL}, it means that the reference count of the object in our variables registry reached 0 before the \texttt{dec\_ref} routine could decrement it.
+This is considered an impossibility: how could it reach 0 if we were holding a reference to it?
+To represent this impossibility we create a new error state, outside the main loop body:
+\begin{verbatim}
+	int main()
+	{
+	    while (true) {
+	        // ...
+
+	        switch (action) {
+	            // ...
+	        }
+	    }
+
+	    error:
+	    while (true) { }
+	}
+\end{verbatim}
+
+A program execution that reaches this state, never goes back to a correct state.
+This is a common pattern in formal verification.
+In the following section, we will somehow encode that a valid program execution is one that never enters the error state.
+
+Now let's look at the \texttt{inc\_ref} action, where we want to acquire a reference to an object that was already allocated, possibly by a different thread:
+\begin{verbatim}
+	case 2:  // inc_ref
+        if (variables[variable] != NULL) {
+            break;
+        }
+
+        object *obj = choose();  // registers[7]
+        if (!obj->allocated || obj->freed) {
+            break;
+        }
+
+        variables[variable] = obj;
+        registers[0] = variables[variable];
+        inc_ref();
+
+        if (registers[0] == NULL) {
+            variables[variable] = NULL;
+        }
+
+        registers[0] = NULL;
+        break;
+\end{verbatim}
+
+Here, we want to make sure that we are not replacing an already populated variable.
+Next, we want to randomly pick\footnote{%
+	A real program wouldn't pick an object at random, instead picking one according to its logic, which here we model with non-determinism.
+} an object from memory.
+The condition that we need to satisfy to cope with the non-determinism is to check that the object was previously allocated, and has not been freed.
+Notice that a real program doesn't generally have the opportunity to check for these states.
+The implicit assumption here is that the program logic we're glossing over, also takes care of not using a faulty pointer.
+
+If the call to \texttt{inc\_ref} fails, we don't need to go into the error state: the fact that an incref doesn't work is perfectly normal, we don't incur in a use-after-free because of our QSBR scheme.
+It simply means that we didn't manage to acquire a new reference to the object, and thus need to refrain from doing so (and also clean up the reference in the variables array).
+
+The GC action is very trivial: simply call the \texttt{gc\_cycle} function to maybe run a GC cycle.
+The allocation part is very similar to what we've already seen, you can read it in the full pseudocode in~\S\ref{sec:refcount-full-pseudocode}.
+
+
+\section{PVS Specification}\label{sec:refcount-pvs-specification}
+
+The full specification can be found in~\S\ref{sec:refcount-full-pvs-specification}.
+We won't go through it entirely, skipping the intuitive parts.
+
+First of all, we declare that our specification is parameterized on the number of threads:
+\begin{verbatim}
+	refcount[T: {x: nat | x >= 1}]: THEORY
+	BEGIN
+\end{verbatim}
+
+This means that we may prove the correctness of our specification, irrespective of the number of threads $T$.
+That number $T$ needs to be fixed and known for our proofs to work, but the proof holds independently of any value of $T \geq 1$.
+If you recall that the way the STW mechanism works is by decrementing a counter initialized with the number of threads, then you'll immediately see why we need to have $T$ as a fixed number.
+
+One important aspect of the specification is pertaining states: we wish to encode in PVS that the program execution is in a specific state.
+That is, one global state for all threads, comprising a complete state of the global memory, of the registers and variables local to each thread, the global STW flags and counter, the global GC linked list, and the program counter of each thread.
+We'll use the latter to describe what instruction a thread should be executing next, which is a natural way of encoding the fact that each real thread does have its own program counter.
+All of this information combined indicates one definite state of the execution of our program, which we can use to check some invariants to prove correctness.
+
+\begin{verbatim}
+    GC: TYPE = list[Address]
+
+    State: TYPE = [#
+        memory: [Address -> Object],
+
+        registers: [Thread -> [int -> int]],
+        variables: [Thread -> [int -> int]],
+
+        gc_head: GC,
+
+        STW_world_stopped: bool,
+        STW_requested: bool,
+        STW_count_down: int,
+
+        pc: [Thread -> nat]
+    #]
+\end{verbatim}
+
+As you can see, the \texttt{GC} type was very simple to define: PVS already has built-in\footnote{%
+	Or rather, \emph{prelude} datatypes: you can find them in your PVS installation folder, in a file called \texttt{prelude.pvs}.
+} datatypes for linked lists, among many other utilities.
+
+We'll take a look at the specification of the \texttt{free} function first, since it is rather simple.
+\begin{verbatim}
+	free(t, s1, s2): bool = s1`pc(t) = 36 and (
+	    if s1`memory(s1`registers(t)(0))`freed = false then
+	        s2 = s1 with [
+	            (memory)(s1`registers(t)(0)) :=
+	                    s1`memory(s1`registers(t)(0)) with [
+	                        (freed) := true
+	            ],
+	            (pc)(t) := 107
+	        ]
+	    else
+	        s2 = s1 with [
+	            (pc)(t) := 107
+	        ]
+	    endif
+	)
+\end{verbatim}
+
+First of all, you should notice that the way we specify the behavior of the single line of pseudocode in the free routine is by specifying a function that returns true if the state \texttt{s2} is the one state that could be reached from \texttt{s1} if thread \texttt{t} happened to be the one in execution and its program counter happened to be at line 36.
+Notice how we're not explicitly modifying the state, instead we're asserting whether one state is the successor of another.
+We do so by asserting whether the successor state is equal to the predecessor state, with the modification we expect from the execution of the line of code.
+In this sense, a line of code (or rather, an assembly instruction, but we're not going to that much detail), is simply a specification of how the state of the machine should be modified.
+A computer programmer should be familiar with this concept, even though they never used it.
+Unlike a normal computer program, here we're interested in specifying all the possible such modifications so as to prove that all the traces (i.e.\ executions) that can be produced by the correct sequencing of those modifications, are correct.
+
+Also notice how we are modeling the fact that only one thread modifies the state at a given time.
+The line numbers refer to the pseudocode that we prepared in the above section.
+
+Talking about the behavior of \texttt{free} specifically, we can also observe the modeling of the behavior of a CAS instruction.
+In the same state change, we both check that the memory contains the expected value and we either modify it, or don't.
+In this case, we don't take a different path (i.e.\ the next program counter is the same in both branches of the if) when the CAS fails, but you can see how we could have easily specified that.
+
+Also, you may have noticed that we set an absolute line number as the next program counter.
+This should surprise programmers who are used to be able to call functions from anywhere in their programs.
+We have purposefully written our pseudocode to contain at most one call site for each function in it.
+This property enables us to employ this trick of explicitly setting the next PC\@.
+If instead we didn't have that property, we would in principle be forced to also model a call stack, like the one that normal computer programs have.
+That would render our PVS specification much more difficult to prove.
+
+Now let's consider the \texttt{alloc} routine, where we make use of non-deter\-minism to get the address of newly allocated memory:
+\begin{verbatim}
+	alloc(t, s1, s2): bool = s1`pc(t) = 28 and (
+	    exists (a: Address): (
+	        (
+	            % preconditions
+	            s1`memory(a) = (# refcount := 0,
+	                              allocated := false,
+	                              freed := false #)
+	        )
+	    ) => (
+	        % mutation (allocation)
+	        s2 = s1 with [
+	            (memory)(a) := (# refcount := 1,
+	                              allocated := true,
+	                              freed := false #),
+	            (registers)(t)(0) := a,
+	            (pc)(t) := 154
+	        ]
+	    )
+	)
+\end{verbatim}
+
+As you can see the magic of non-determinism here is simply expressed by an existence: we say that if there exist an address, such that it satisfies some conditions, then we can proceed with the state transition.
+The precondition here is that there exist an unused address.
+This is always going to be the case since we have infinite memory, so there are infinitely many objects like this one,\footnote{%
+	You'll also want to check the definition of an initial state, explained later.
+} therefore the preconditions are always satisfied.
+In order to simplify our writing we both set the \texttt{allocated} field of the object to \texttt{true} and set register 0 to the pointer we just found.
+Since the register is local, we can collapse those two states into one, without compromising the correctness in spite of concurrency.
+Also note, that by simply saying $\exists a$, we have successfully avoided having to choose an address efficiently like \texttt{malloc} does.
+This doesn't mean that an actual implementation of this prototype cannot have an efficient mechanism for allocation here: we just don't care to specify it.
+
+Let's now jump forward to the last line of the decref routine (\texttt{dec\_ref\_4}), focusing on the branch taken when the CAS succeeds:
+\begin{verbatim}
+	s2 = s1 with [
+	    (memory)(s1`registers(t)(0)) :=
+	        s1`memory(s1`registers(t)(0)) with [
+	            (refcount) := s1`registers(t)(1) - 1
+	        ],
+	    (pc)(t) := 84
+	]
+\end{verbatim}
+
+Here we're decrementing the counter.
+If we had specified that our \texttt{Object} type has a \texttt{refcount} of type \texttt{nat} instead of \texttt{int}, then we would have had to deal with TCCs at this line (and other lines like this one).
+This would have been impossible to prove: the fact that \texttt{s1`registers(t)(0)} stores a number $\geq 1$ is derived from a trace of transitions, and cannot be evinced by simply looking at this line on its own.
+Instead, we can say that the \texttt{refcount} has type \texttt{int} and leave this pseudo-type checking to our invariants.
+
+In \texttt{{dec\_ref\_7}} we have taken a deliberate shortcut:
+\begin{verbatim}
+	dec_ref_7(t, s1, s2): bool = s1`pc(t) = 87 and (
+	    s2 = s1 with [
+	        (gc_head) := append(s1`gc_head,
+	            cons(s1`registers(t)(0), null)
+	        ),
+	        (pc)(t) := 107
+	    ]
+	)
+\end{verbatim}
+
+This one state change pertains lines 87 to 97, and treats them as one atomic operation.
+We shouldn't do this in principle.
+Nevertheless, we can assume that a safe way to achieve this change that employs several transitions exist, both in PVS and in the real world (the pseudocode provided should be a convincing example), and thus we need not fully specify the atomicity of a linked-list append, as such would be trivial, but cumbersome to prove.
+
+Just below, we have taken a similar shortcut for the GC collect routine:
+\begin{verbatim}
+	s2 = s1 with [
+	    (gc_head) := cdr(s1`gc_head),
+	    (memory)(car(s1`gc_head)) :=
+            s1`memory(car(s1`gc_head)) with [
+	            (freed) := true
+	        ],
+	    (pc)(t) := 107
+	]
+\end{verbatim}
+
+As you can see, we modify both the \texttt{{gc\_head}} shared variable, and free the object, skipping the actual call to \texttt{free}, which is unrealistic.
+This is again fine, around this \texttt{collect} call we have already worked on holding the related STW locks, thus all modifications we make to memory can be thought of as atomic, from the perspective of the remaining threads.
+
+\begin{exercise}\label{ex:gc-cycle-4}
 	Consider \texttt{gc\_cycle\_4}.
-	What, if anything, would change if it was split into multiple functions, each mutating the global state one variable at a time?
+	From the proof point of view, what, if anything, would change if it was split into multiple functions, each mutating the global state one variable at a time?
 	Explain your answer.
 \end{exercise}
+
+\begin{exercise}
+	Consider \texttt{{main\_2}} where non-determinism is used to choose what action a thread takes.
+	It doesn't guarantee that globally some thread eventually chooses to become the GC, which is required in order to prove Rule~(\ref{refcount:eventual-free}).
+	Modify the relevant parts of the pseudocode and of the PVS specification to ensure that rule.
+\end{exercise}
+
+Going further down, let's take a look at the \texttt{step} function:
+\begin{verbatim}
+	step(t, s1, s2): bool =
+	    alloc(t, s1, s2)
+	    or free(t, s1, s2)
+	    or inc_ref_1(t, s1, s2)
+	    % ...
+	    or main_23(t, s1, s2)
+	    or error(t, s1, s2)
+\end{verbatim}
+
+With this function we enumerate all the possible transitions that can take place in between two states.
+Notice again how only one thread can make any progress in the execution of one step.
+The non-exclusive OR works here because each of those functions has a condition like $\mathrm{pc}(t) = x$, where x is a line number so that it is disjunct w.r.t.\ all other transition functions.
+If we used XOR, the proofs would take longer to complete because PVS would also have to check that exclusivity.
+
+Later, we define what an initial state is allowed to look like:
+\begin{verbatim}
+	init_empty_memory(s): bool =
+	    forall (a: Address):
+	        s`memory(a) = (# refcount := 0, allocated := false, freed := false #)
+
+	init_empty_registers(s): bool =
+	    forall (t: Thread, r: Register):
+	        s`registers(t)(r) = NULL
+
+	init_empty_variables(s): bool =
+	    forall (t: Thread, v: Variable):
+	        s`variables(t)(v) = NULL
+
+	init_starting_pc(s): bool =
+	    forall (t: Thread):
+	        s`pc(t) = 146
+
+	init(s): bool =
+	    true
+	    and init_empty_memory(s)
+	    and init_empty_registers(s)
+	    and init_empty_variables(s)
+	    and init_starting_pc(s)
+	    and s`gc_head = null
+	    and s`STW_world_stopped = false
+	    and s`STW_requested = false
+	    and s`STW_count_down = T
+\end{verbatim}
+
+This should be rather intuitive.
+We can point out that \texttt{init\_empty\_memory} ensures that the precondition of \texttt{alloc} can always be met.
+Or equivalently, that can only be unmet after an infinite number of allocations.
+
+Then, we define some invariants that we want all the states to hold:
+\begin{verbatim}
+	INV(s): bool =
+	    true
+	    and rule_1(s)
+	    and rule_6(s)
+	    and rule_7(s)
+	    and not_in_error_state(s)
+\end{verbatim}
+
+This represents the set of ``good'' states that we may encounter in an execution of our program.
+Then, we want to prove two core theorems: the initial states are ``good,'' and from a ``good'' state we will necessarily go into another ``good'' state:
+\begin{verbatim}
+	init_implies_invariants: THEOREM
+	    forall (s: State):
+	        init(s) => INV(s)
+
+	step_implies_invariants: THEOREM
+	    forall (t: Thread, s1: State, s2: State):
+	        step(t, s1, s2) and INV(s1) => INV(s2)
+\end{verbatim}
+
+Proving these two theorems provides the full proof that our theory about concurrent reference counting is correct.
+
 
 \section{Big Data}\label{sec:big-data}
 
 Let's add data to our objects!
 How much data?
-A lot of data!
-Yes!
-No seriously, how much?
-I need to write the number of bytes to allocate for this buffer.
-Well, some people say it's gigabytes, some say it's exabytes, and others more reasonably say it's ``whatever doesn't fit in your RAM.''
+All the data!
 
-Let us not succumb to the major pitfall of the trendy big data: trying to define ``big.''
 Let's take a step back.
 We're trying to reason on the correctness of a memory management system.
 In particular, of an abstract system that can use an infinite amount of space!
-Try to beat infinity in your ``big data'' system.
 It turns out that with infinite space we could store a single bit per object and still have the possibility of encoding all the natural numbers.
 In fact, we don't even need that bit!
-We can encode whatever information we need simply in the address of one object.
+We can encode whatever information we need simply in the address of an object.
 Since there can be an infinite amount of objects, there must be an infinite number of addresses.
 Assuming that the memory allocator gives out an object at a perfectly random address, after an infinite number of attempts, we will manage to get the object at the exact address that we need.
 
@@ -166,5 +708,11 @@ Otherwise, if it points to another object $\beta$, then it means that $\alpha$ r
 	Nevertheless, what follows does hold for garbage collection in general.
 }
 
-This poses a problem for our GC.
+This poses a problem for our GC\@.
 If there exist two distinct objects $\alpha$ and $\beta$, such that $\alpha$ points to $\beta$, then $\beta$ cannot be freed before $\alpha$ is freed.
+
+
+\begin{itemize}
+	\item modify the previous pseudocode and pvs spec;
+	\item prove that every object is eventually freed
+\end{itemize}
